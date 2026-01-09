@@ -611,13 +611,11 @@ app.put('/api/attendance/break/end', async (req, res) => {
         res.status(500).json({ error: error.message });
     }
 });
-app.get('/api/breaks', verifyOwner, async (req, res) => {
+// 3. Get Today's Breaks (Public - No Login Required)
+app.get('/api/breaks', async (req, res) => {
     try {
         const breaks = await BreakRecord.findAll({
-            include: [{
-                model: Employee,
-                attributes: ['full_name', 'department']
-            }],
+            include: [{ model: Employee, attributes: ['full_name'] }],
             order: [['start_time', 'DESC']]
         });
         res.json(breaks);
