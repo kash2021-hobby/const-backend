@@ -208,6 +208,46 @@ const Admin = sequelize.define('Admin', {
     tableName: 'admins',
     timestamps: false  // This tells Sequelize NOT to look for or create created_at/updated_at
 });
+
+const BreakRecord = sequelize.define('BreakRecord', {
+    id: {
+        type: DataTypes.UUID,
+        defaultValue: DataTypes.UUIDV4,
+        primaryKey: true
+    },
+    employee_id: {
+        type: DataTypes.UUID,
+        allowNull: false
+    },
+    date: {
+        type: DataTypes.DATEONLY,
+        defaultValue: DataTypes.NOW
+    },
+    start_time: {
+        type: DataTypes.DATE, // Timestamp when break started
+        allowNull: false
+    },
+    end_time: {
+        type: DataTypes.DATE // Timestamp when break ended
+    },
+    duration_minutes: {
+        type: DataTypes.INTEGER // Calculated total minutes of the break
+    },
+    type: {
+        type: DataTypes.STRING, // Optional: "Lunch", "Tea", etc.
+        defaultValue: 'General'
+    }
+}, {
+    tableName: 'break_records',
+    timestamps: true,
+    updatedAt: false,
+    createdAt: 'created_at',
+    underscored: true
+});
+
+// === ADD RELATIONSHIPS ===
+Employee.hasMany(BreakRecord, { foreignKey: 'employee_id' });
+BreakRecord.belongsTo(Employee, { foreignKey: 'employee_id' });
 // MIDDLEWARE: Verifies if the user is the Owner
 const verifyOwner = (req, res, next) => {
     const token = req.headers['authorization'];
@@ -502,6 +542,85 @@ app.post('/api/members', async (req, res) => {
 
         const member = await NewMember.create({ name, number });
         res.status(201).json({ message: 'Member added successfully', data: member });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+app.post('/api/attendance/break/start', async (req, res) => {
+    try {
+        const { employee_id, type } = req.body;
+
+        // 1. Check if they are already on a break (an open record exists)
+        const activeBreak = await BreakRecord.findOne({
+            where: {
+                employee_id,
+                date: new Date(),
+                end_time: null
+            }
+        });
+
+        if (activeBreak) {
+            return res.status(400).json({ error: 'You are already on a break!' });
+        }
+
+        // 2. Start the break
+        const newBreak = await BreakRecord.create({
+            employee_id,
+            start_time: new Date(),
+            date: new Date(),
+            type: type || 'General'
+        });
+
+        res.status(201).json({ message: 'Break started', data: newBreak });
+
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+app.put('/api/attendance/break/end', async (req, res) => {
+    try {
+        const { employee_id } = req.body;
+
+        // 1. Find the active break
+        const activeBreak = await BreakRecord.findOne({
+            where: {
+                employee_id,
+                date: new Date(),
+                end_time: null
+            }
+        });
+
+        if (!activeBreak) {
+            return res.status(404).json({ error: 'No active break found to end' });
+        }
+
+        // 2. Calculate duration
+        const now = new Date();
+        const startTime = new Date(activeBreak.start_time);
+        const diffMs = now - startTime;
+        const minutes = Math.floor(diffMs / 60000); // Convert ms to minutes
+
+        // 3. Update record
+        activeBreak.end_time = now;
+        activeBreak.duration_minutes = minutes;
+        await activeBreak.save();
+
+        res.json({ message: 'Break ended', duration_minutes: minutes, data: activeBreak });
+
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+app.get('/api/breaks', verifyOwner, async (req, res) => {
+    try {
+        const breaks = await BreakRecord.findAll({
+            include: [{
+                model: Employee,
+                attributes: ['full_name', 'department']
+            }],
+            order: [['start_time', 'DESC']]
+        });
+        res.json(breaks);
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
