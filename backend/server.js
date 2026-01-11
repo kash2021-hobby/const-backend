@@ -338,12 +338,12 @@ app.post('/api/auth/send-otp', async (req, res) => {
     await user.save();
 
     // 4. Send Email
-    const mailOptions = {
-      from: 'Attendance App',
-      to: email,
-      subject: 'Login Verification Code',
-      text: `Hello ${user.full_name},\n\nYour OTP is: ${otp}`
-    };
+   const mailOptions = {
+  from: 'Attendance App <kashyapnandan2021@gmail.com>', // Must be verified in Brevo
+  to: email, 
+  subject: 'Login Verification Code',
+  text: `Your OTP is: ${otp}`
+};
 
     transporter.sendMail(mailOptions, (error, info) => {
       if (error) {
