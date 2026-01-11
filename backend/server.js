@@ -29,19 +29,26 @@ console.log('PORT:', process.env.PORT);
 console.log('==== ENV DEBUG END ====');
 
 // REPLACE THIS BLOCK
+// --- REPLACE YOUR TRANSPORTER CONFIGURATION ---
+
 const transporter = nodemailer.createTransport({
-  host: 'smtp.gmail.com', // Explicit host
-  port: 587,              // Explicit port (better for cloud servers)
-  secure: false,          // "false" for port 587 (uses STARTTLS)
+  host: 'smtp-relay.brevo.com', // Brevo's Server
+  port: 2525,                   // Port 2525 is NOT blocked by Render
+  secure: false,                // False for port 2525
   auth: {
-    user: process.env.EMAIL_USER, 
-    pass: process.env.EMAIL_PASS
-  },
-  tls: {
-    rejectUnauthorized: false // Helps avoid some strict SSL errors on Render
+    user: process.env.EMAIL_USER, // Your Brevo Email
+    pass: process.env.EMAIL_PASS  // Your Brevo Master Password / SMTP Key
   }
 });
 
+// Verify connection on startup
+transporter.verify((error, success) => {
+  if (error) {
+    console.log("❌ Email Error:", error);
+  } else {
+    console.log("✅ Brevo Email Service is Ready");
+  }
+});
 // ADD THIS: Verify connection on startup to debug errors immediately
 transporter.verify((error, success) => {
   if (error) {
