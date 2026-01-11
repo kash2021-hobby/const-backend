@@ -31,32 +31,32 @@ console.log('==== ENV DEBUG END ====');
 // REPLACE THIS BLOCK
 // --- REPLACE YOUR TRANSPORTER CONFIGURATION ---
 
-const transporter = nodemailer.createTransport({
-  host: 'smtp-relay.brevo.com', // Brevo's Server
-  port: 2525,                   // Port 2525 is NOT blocked by Render
-  secure: false,                // False for port 2525
-  auth: {
-    user: process.env.EMAIL_USER, // Your Brevo Email
-    pass: process.env.EMAIL_PASS  // Your Brevo Master Password / SMTP Key
-  }
-});
+// const transporter = nodemailer.createTransport({
+//   host: 'smtp-relay.brevo.com', // Brevo's Server
+//   port: 2525,                   // Port 2525 is NOT blocked by Render
+//   secure: false,                // False for port 2525
+//   auth: {
+//     user: process.env.EMAIL_USER, // Your Brevo Email
+//     pass: process.env.EMAIL_PASS  // Your Brevo Master Password / SMTP Key
+//   }
+// });
 
-// Verify connection on startup
-transporter.verify((error, success) => {
-  if (error) {
-    console.log("❌ Email Error:", error);
-  } else {
-    console.log("✅ Brevo Email Service is Ready");
-  }
-});
-// ADD THIS: Verify connection on startup to debug errors immediately
-transporter.verify((error, success) => {
-  if (error) {
-    console.log("❌ Email Server Connection Error:", error);
-  } else {
-    console.log("✅ Email Server is Ready to send messages");
-  }
-});
+// // Verify connection on startup
+// transporter.verify((error, success) => {
+//   if (error) {
+//     console.log("❌ Email Error:", error);
+//   } else {
+//     console.log("✅ Brevo Email Service is Ready");
+//   }
+// });
+// // ADD THIS: Verify connection on startup to debug errors immediately
+// transporter.verify((error, success) => {
+//   if (error) {
+//     console.log("❌ Email Server Connection Error:", error);
+//   } else {
+//     console.log("✅ Email Server is Ready to send messages");
+//   }
+// });
 // 2. SETUP DATABASE CONNECTION (All in one place)
 const sequelize = new Sequelize(
     process.env.DB_NAME,
@@ -308,6 +308,7 @@ const verifyOwner = (req, res, next) => {
 // === AUTH ROUTES ===
 
 // --- API 1: SEND OTP (Strict Check: Name + Phone + Email) ---
+// --- API 1: SEND OTP (TESTING MODE - NO EMAIL) ---
 app.post('/api/auth/send-otp', async (req, res) => {
   try {
     const { name, phone, email } = req.body;
@@ -317,42 +318,31 @@ app.post('/api/auth/send-otp', async (req, res) => {
         return res.status(400).json({ error: 'Please provide Name, Phone, and Email.' });
     }
 
-    // 2. Find user matching ALL THREE credentials
-    // This ensures the email they typed actually belongs to the verified phone number
+    // 2. Find user matching credentials
     const user = await Employee.findOne({ 
       where: { 
         phone: phone,
-        // We compare lowercase to be safe
         email: email, 
         full_name: name 
       } 
     });
 
     if (!user) {
-      return res.status(404).json({ error: 'The email provided does not match our records for this employee.' });
+      return res.status(404).json({ error: 'User details do not match our records.' });
     }
 
-    // 3. Generate OTP
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    // 3. HARDCODED OTP (Bypassing Email Service)
+    const otp = '52050'; 
+    
+    // Save '52050' to the database so the Verify API accepts it
     user.otp = otp;
     await user.save();
 
-    // 4. Send Email
-   const mailOptions = {
-  // The email inside < > MUST be the same as process.env.EMAIL_USER
-  from: `Attendance App <${process.env.EMAIL_USER}>`, 
-  to: email, 
-  subject: 'Login Verification Code',
-  text: `Your OTP is: ${otp}`
-};
+    console.log(`>> TEST MODE: OTP for ${user.full_name} set to ${otp}`);
 
-    transporter.sendMail(mailOptions, (error, info) => {
-      if (error) {
-        console.log(error);
-        return res.status(500).json({ error: 'Failed to send email' });
-      }
-      res.json({ message: 'OTP sent successfully!' });
-    });
+    // 4. Return Success immediately
+    // The frontend thinks an email was sent and will ask for the code.
+    res.json({ message: 'OTP sent successfully!' });
 
   } catch (error) {
     res.status(500).json({ error: error.message });
