@@ -31,8 +31,8 @@ console.log('==== ENV DEBUG END ====');
 const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: {
-    user: 'kashyapnandan2021@gmail.com', // <--- REPLACE THIS
-    pass: process.env.EMAIL_PASS      // <--- REPLACE THIS
+    user: process.env.EMAIL_USER, // <--- Secure
+    pass: process.env.EMAIL_PASS
   }
 });
 // 2. SETUP DATABASE CONNECTION (All in one place)
@@ -48,6 +48,7 @@ const sequelize = new Sequelize(
 );
 
 // 3. DEFINE MODEL (Employee Schema)
+// 3. DEFINE MODEL (Employee Schema)
 const Employee = sequelize.define('Employee', {
     id: {
         type: DataTypes.UUID,
@@ -55,6 +56,16 @@ const Employee = sequelize.define('Employee', {
         primaryKey: true
     },
     full_name: { type: DataTypes.STRING, allowNull: false },
+    // --- ADDED MISSING COLUMNS HERE ---
+    email: { 
+        type: DataTypes.STRING, 
+        allowNull: true, // Allow null initially if some employees don't have email yet
+        unique: true 
+    },
+    otp: { 
+        type: DataTypes.STRING 
+    },
+    // ----------------------------------
     dob: { type: DataTypes.DATEONLY },
     joining_date: { type: DataTypes.DATEONLY, allowNull: false },
     employment_type: { 
@@ -81,8 +92,8 @@ const Employee = sequelize.define('Employee', {
 }, {
     tableName: 'employees',
     underscored: true,
-    timestamps: true,       // Keep timestamps enabled...
-    updatedAt: false,       // ...BUT tell Sequelize "updated_at" does not exist
+    timestamps: true,       
+    updatedAt: false,       
     createdAt: 'created_at'
 });
 const Attendance = sequelize.define('Attendance', {
@@ -274,74 +285,91 @@ const verifyOwner = (req, res, next) => {
 // Get All
 // === AUTH ROUTES ===
 
+// --- API 1: SEND OTP (Check Name & Phone -> Send to Email) ---
 app.post('/api/auth/send-otp', async (req, res) => {
   try {
-    const { email } = req.body;
+    const { name, phone } = req.body;
 
-    // 1. Check if user exists
-    const user = await Employee.findOne({ where: { email } });
-    if (!user) {
-      return res.status(404).json({ error: 'Email not found in our system.' });
+    // 1. Validate Input
+    if (!name || !phone) {
+        return res.status(400).json({ error: 'Please enter both Name and Phone Number.' });
     }
 
-    // 2. Generate 6-digit OTP
+    // 2. Find user matching Name AND Phone
+    // We use simple matching. Ensure the user types the name exactly as registered.
+    const user = await Employee.findOne({ 
+      where: { 
+        phone: phone,
+        full_name: name 
+      } 
+    });
+
+    if (!user) {
+      return res.status(404).json({ error: 'No employee found with these details.' });
+    }
+
+    // Security Check: Does this user actually have an email?
+    if (!user.email) {
+      return res.status(400).json({ error: 'This employee does not have an email registered to receive OTPs.' });
+    }
+
+    // 3. Generate 6-digit OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
 
-    // 3. Save OTP to database (You need an 'otp' column in your Employee table)
-    // If you don't have an 'otp' column, create it, or store it in a temporary table.
+    // 4. Save OTP to DB
     user.otp = otp;
     await user.save();
 
-    // 4. Send Email
+    // 5. Send Email to the STORED email
     const mailOptions = {
       from: 'Attendance App',
-      to: email,
-      subject: 'Your Login OTP',
-      text: `Your OTP for login is: ${otp}`
+      to: user.email, // <--- Auto-fetched from DB
+      subject: 'Login Verification Code',
+      text: `Hello ${user.full_name},\n\nYour OTP is: ${otp}`
     };
 
     transporter.sendMail(mailOptions, (error, info) => {
       if (error) {
-        console.log(error);
-        return res.status(500).json({ error: 'Failed to send email' });
+        console.log("Email Error:", error);
+        return res.status(500).json({ error: 'Failed to send email.' });
       }
-      res.json({ message: 'OTP sent successfully!' });
+      // Return masked email so frontend can show "OTP sent to a***@gmail.com"
+      res.json({ message: 'OTP Sent', email: user.email });
     });
 
   } catch (error) {
+    console.error("Server Error:", error);
     res.status(500).json({ error: error.message });
   }
 });
 
-// --- API 2: VERIFY OTP & LOGIN ---
+// --- API 2: VERIFY OTP (Check Phone & OTP) ---
 app.post('/api/auth/verify-otp', async (req, res) => {
   try {
-    const { email, otp } = req.body;
+    const { phone, otp } = req.body;
 
-    // 1. Find User
-    const user = await Employee.findOne({ where: { email } });
+    // 1. Find User by Phone (Unique)
+    const user = await Employee.findOne({ where: { phone } });
+    
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
 
     // 2. Verify OTP
-    // Ensure you handle data types (string vs number) correctly
     if (String(user.otp) !== String(otp)) {
       return res.status(400).json({ error: 'Invalid OTP' });
     }
 
-    // 3. Clear OTP after success (Optional but recommended)
+    // 3. Success - Clear OTP and return user
     user.otp = null;
     await user.save();
 
-    // 4. Return User Data (Success)
     res.json({ message: 'Login successful', user });
 
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
-
 // 1. REGISTER OWNER (Run this ONCE in Postman to create your account)
 app.post('/api/auth/register', async (req, res) => {
     try {
