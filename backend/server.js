@@ -5,6 +5,7 @@ const { Sequelize, DataTypes } = require('sequelize');
  // Optional if you hardcode creds below
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
+const nodemailer = require('nodemailer');
 
 const SECRET_KEY = process.env.JWT_SECRET || 'super_secret_owner_key'; // CHANGE THIS IN PRODUCTION
 
@@ -27,7 +28,13 @@ console.log('DB_PASSWORD EXISTS:', !!process.env.DB_PASSWORD);
 console.log('PORT:', process.env.PORT);
 console.log('==== ENV DEBUG END ====');
 
-
+const transporter = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    user: 'kashyapnandan2021@gmail.com', // <--- REPLACE THIS
+    pass: process.env.EMAIL_PASS      // <--- REPLACE THIS
+  }
+});
 // 2. SETUP DATABASE CONNECTION (All in one place)
 const sequelize = new Sequelize(
     process.env.DB_NAME,
@@ -266,6 +273,74 @@ const verifyOwner = (req, res, next) => {
 // 5. API ROUTES
 // Get All
 // === AUTH ROUTES ===
+
+app.post('/api/auth/send-otp', async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    // 1. Check if user exists
+    const user = await Employee.findOne({ where: { email } });
+    if (!user) {
+      return res.status(404).json({ error: 'Email not found in our system.' });
+    }
+
+    // 2. Generate 6-digit OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+
+    // 3. Save OTP to database (You need an 'otp' column in your Employee table)
+    // If you don't have an 'otp' column, create it, or store it in a temporary table.
+    user.otp = otp;
+    await user.save();
+
+    // 4. Send Email
+    const mailOptions = {
+      from: 'Attendance App',
+      to: email,
+      subject: 'Your Login OTP',
+      text: `Your OTP for login is: ${otp}`
+    };
+
+    transporter.sendMail(mailOptions, (error, info) => {
+      if (error) {
+        console.log(error);
+        return res.status(500).json({ error: 'Failed to send email' });
+      }
+      res.json({ message: 'OTP sent successfully!' });
+    });
+
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// --- API 2: VERIFY OTP & LOGIN ---
+app.post('/api/auth/verify-otp', async (req, res) => {
+  try {
+    const { email, otp } = req.body;
+
+    // 1. Find User
+    const user = await Employee.findOne({ where: { email } });
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // 2. Verify OTP
+    // Ensure you handle data types (string vs number) correctly
+    if (String(user.otp) !== String(otp)) {
+      return res.status(400).json({ error: 'Invalid OTP' });
+    }
+
+    // 3. Clear OTP after success (Optional but recommended)
+    user.otp = null;
+    await user.save();
+
+    // 4. Return User Data (Success)
+    res.json({ message: 'Login successful', user });
+
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 
 // 1. REGISTER OWNER (Run this ONCE in Postman to create your account)
 app.post('/api/auth/register', async (req, res) => {
