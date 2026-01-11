@@ -28,11 +28,26 @@ console.log('DB_PASSWORD EXISTS:', !!process.env.DB_PASSWORD);
 console.log('PORT:', process.env.PORT);
 console.log('==== ENV DEBUG END ====');
 
+// REPLACE THIS BLOCK
 const transporter = nodemailer.createTransport({
-  service: 'gmail',
+  host: 'smtp.gmail.com', // Explicit host
+  port: 587,              // Explicit port (better for cloud servers)
+  secure: false,          // "false" for port 587 (uses STARTTLS)
   auth: {
-    user: process.env.EMAIL_USER, // <--- Secure
+    user: process.env.EMAIL_USER, 
     pass: process.env.EMAIL_PASS
+  },
+  tls: {
+    rejectUnauthorized: false // Helps avoid some strict SSL errors on Render
+  }
+});
+
+// ADD THIS: Verify connection on startup to debug errors immediately
+transporter.verify((error, success) => {
+  if (error) {
+    console.log("❌ Email Server Connection Error:", error);
+  } else {
+    console.log("✅ Email Server is Ready to send messages");
   }
 });
 // 2. SETUP DATABASE CONNECTION (All in one place)
