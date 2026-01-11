@@ -285,64 +285,56 @@ const verifyOwner = (req, res, next) => {
 // Get All
 // === AUTH ROUTES ===
 
-// --- API 1: SEND OTP (Check Name & Phone -> Send to Email) ---
+// --- API 1: SEND OTP (Strict Check: Name + Phone + Email) ---
 app.post('/api/auth/send-otp', async (req, res) => {
   try {
-    const { name, phone } = req.body;
+    const { name, phone, email } = req.body;
 
     // 1. Validate Input
-    if (!name || !phone) {
-        return res.status(400).json({ error: 'Please enter both Name and Phone Number.' });
+    if (!name || !phone || !email) {
+        return res.status(400).json({ error: 'Please provide Name, Phone, and Email.' });
     }
 
-    // 2. Find user matching Name AND Phone
-    // We use simple matching. Ensure the user types the name exactly as registered.
+    // 2. Find user matching ALL THREE credentials
+    // This ensures the email they typed actually belongs to the verified phone number
     const user = await Employee.findOne({ 
       where: { 
         phone: phone,
+        // We compare lowercase to be safe
+        email: email, 
         full_name: name 
       } 
     });
 
     if (!user) {
-      return res.status(404).json({ error: 'No employee found with these details.' });
+      return res.status(404).json({ error: 'The email provided does not match our records for this employee.' });
     }
 
-    // Security Check: Does this user actually have an email?
-    if (!user.email) {
-      return res.status(400).json({ error: 'This employee does not have an email registered to receive OTPs.' });
-    }
-
-    // 3. Generate 6-digit OTP
+    // 3. Generate OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
-
-    // 4. Save OTP to DB
     user.otp = otp;
     await user.save();
 
-    // 5. Send Email to the STORED email
+    // 4. Send Email
     const mailOptions = {
       from: 'Attendance App',
-      to: user.email, // <--- Auto-fetched from DB
+      to: email,
       subject: 'Login Verification Code',
       text: `Hello ${user.full_name},\n\nYour OTP is: ${otp}`
     };
 
     transporter.sendMail(mailOptions, (error, info) => {
       if (error) {
-        console.log("Email Error:", error);
-        return res.status(500).json({ error: 'Failed to send email.' });
+        console.log(error);
+        return res.status(500).json({ error: 'Failed to send email' });
       }
-      // Return masked email so frontend can show "OTP sent to a***@gmail.com"
-      res.json({ message: 'OTP Sent', email: user.email });
+      res.json({ message: 'OTP sent successfully!' });
     });
 
   } catch (error) {
-    console.error("Server Error:", error);
     res.status(500).json({ error: error.message });
   }
 });
-
 // --- API 2: VERIFY OTP (Check Phone & OTP) ---
 app.post('/api/auth/verify-otp', async (req, res) => {
   try {
