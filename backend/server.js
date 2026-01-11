@@ -339,7 +339,8 @@ app.post('/api/auth/send-otp', async (req, res) => {
 
     // 4. Send Email
    const mailOptions = {
-  from: 'Attendance App <kashyapnandan2021@gmail.com>', // Must be verified in Brevo
+  // The email inside < > MUST be the same as process.env.EMAIL_USER
+  from: `Attendance App <${process.env.EMAIL_USER}>`, 
   to: email, 
   subject: 'Login Verification Code',
   text: `Your OTP is: ${otp}`
