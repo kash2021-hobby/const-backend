@@ -787,7 +787,7 @@ async function startServer() {
         console.log(">> 2. Database Connection Established!");
         
         // This is where the magic happens for Hostinger
-        await sequelize.sync({ alter: true });
+     await sequelize.sync();
         console.log(">> 3. Database Synced.");
 
     } catch (err) {
