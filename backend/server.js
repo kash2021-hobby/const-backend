@@ -732,11 +732,11 @@ app.get('/api/breaks', async (req, res) => {
     }
 });
 // In your backend routes
-app.put('/api/holidays/:id', authenticateToken, async (req, res) => {
+app.put('/api/holidays/:id', async (req, res) => {
   // Update holiday logic
 });
 
-app.delete('/api/holidays/:id', authenticateToken, async (req, res) => {
+app.delete('/api/holidays/:id', async (req, res) => {
   // Delete holiday logic
 });
 
