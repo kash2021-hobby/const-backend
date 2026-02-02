@@ -733,12 +733,53 @@ app.get('/api/breaks', async (req, res) => {
 });
 // In your backend routes
 app.put('/api/holidays/:id', async (req, res) => {
-  // Update holiday logic
+    try {
+        const { id } = req.params;
+        const { name, date, description } = req.body;
+
+        const holiday = await Holiday.findByPk(id);
+
+        if (!holiday) {
+            return res.status(404).json({ error: 'Holiday not found' });
+        }
+
+        // Update only provided fields
+        if (name !== undefined) holiday.name = name;
+        if (date !== undefined) holiday.date = date;
+        if (description !== undefined) holiday.description = description;
+
+        await holiday.save();
+
+        res.json({
+            message: 'Holiday updated successfully',
+            data: holiday
+        });
+
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
 });
 
+
 app.delete('/api/holidays/:id', async (req, res) => {
-  // Delete holiday logic
+    try {
+        const { id } = req.params;
+
+        const deleted = await Holiday.destroy({
+            where: { id }
+        });
+
+        if (!deleted) {
+            return res.status(404).json({ error: 'Holiday not found' });
+        }
+
+        res.json({ message: 'Holiday deleted successfully' });
+
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
 });
+
 
 async function startServer() {
     try {
