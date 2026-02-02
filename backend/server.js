@@ -731,6 +731,15 @@ app.get('/api/breaks', async (req, res) => {
         res.status(500).json({ error: error.message });
     }
 });
+// In your backend routes
+app.put('/api/holidays/:id', authenticateToken, async (req, res) => {
+  // Update holiday logic
+});
+
+app.delete('/api/holidays/:id', authenticateToken, async (req, res) => {
+  // Delete holiday logic
+});
+
 async function startServer() {
     try {
         await sequelize.authenticate();
