@@ -1,67 +1,22 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const { Sequelize, DataTypes } = require('sequelize');
- // Optional if you hardcode creds below
+const { Sequelize, DataTypes, Op } = require('sequelize');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
-const nodemailer = require('nodemailer');
 
-const SECRET_KEY = process.env.JWT_SECRET || 'super_secret_owner_key'; // CHANGE THIS IN PRODUCTION
-
-// 1. SETUP EXPRESS APP
 const app = express();
 const PORT = process.env.PORT || 3000;
+const SECRET_KEY = process.env.JWT_SECRET || 'super_secret_owner_key';
+
 app.use(cors());
 app.use(express.json());
 
-app.use((req, res, next) => {
-    console.log(`[${req.method}] ${req.url}`);
-    next();
-});
-
-console.log('==== ENV DEBUG START ====');
-console.log('DB_HOST:', process.env.DB_HOST);
-console.log('DB_NAME:', process.env.DB_NAME);
-console.log('DB_USER:', process.env.DB_USER);
-console.log('DB_PASSWORD EXISTS:', !!process.env.DB_PASSWORD);
-console.log('PORT:', process.env.PORT);
-console.log('==== ENV DEBUG END ====');
-
-// REPLACE THIS BLOCK
-// --- REPLACE YOUR TRANSPORTER CONFIGURATION ---
-
-// const transporter = nodemailer.createTransport({
-//   host: 'smtp-relay.brevo.com', // Brevo's Server
-//   port: 2525,                   // Port 2525 is NOT blocked by Render
-//   secure: false,                // False for port 2525
-//   auth: {
-//     user: process.env.EMAIL_USER, // Your Brevo Email
-//     pass: process.env.EMAIL_PASS  // Your Brevo Master Password / SMTP Key
-//   }
-// });
-
-// // Verify connection on startup
-// transporter.verify((error, success) => {
-//   if (error) {
-//     console.log("❌ Email Error:", error);
-//   } else {
-//     console.log("✅ Brevo Email Service is Ready");
-//   }
-// });
-// // ADD THIS: Verify connection on startup to debug errors immediately
-// transporter.verify((error, success) => {
-//   if (error) {
-//     console.log("❌ Email Server Connection Error:", error);
-//   } else {
-//     console.log("✅ Email Server is Ready to send messages");
-//   }
-// });
-// 2. SETUP DATABASE CONNECTION (All in one place)
+// 1. DATABASE CONNECTION
 const sequelize = new Sequelize(
     process.env.DB_NAME,
-    process.env.DB_USER ,
-    process.env.DB_PASSWORD ,
+    process.env.DB_USER,
+    process.env.DB_PASSWORD,
     {
         host: process.env.DB_HOST,
         dialect: 'mysql',
@@ -69,737 +24,306 @@ const sequelize = new Sequelize(
     }
 );
 
-// 3. DEFINE MODEL (Employee Schema)
-// 3. DEFINE MODEL (Employee Schema)
-const Employee = sequelize.define('Employee', {
-    id: {
-        type: DataTypes.UUID,
-        defaultValue: DataTypes.UUIDV4,
-        primaryKey: true
-    },
-    full_name: { type: DataTypes.STRING, allowNull: false },
-    // --- ADDED MISSING COLUMNS HERE ---
-    email: { 
-        type: DataTypes.STRING, 
-        allowNull: true, // Allow null initially if some employees don't have email yet
-        unique: true 
-    },
-    otp: { 
-        type: DataTypes.STRING 
-    },
-    // ----------------------------------
-    dob: { type: DataTypes.DATEONLY },
-    joining_date: { type: DataTypes.DATEONLY, allowNull: false },
-    employment_type: { 
-        type: DataTypes.ENUM('hourly', 'daily', 'weekly'), 
-        allowNull: false 
-    },
-    work_rate: { type: DataTypes.DECIMAL(10, 2), allowNull: false },
-    position: DataTypes.STRING,
-    department: DataTypes.STRING,
-    shift: { type: DataTypes.ENUM('morning', 'evening', 'night', 'custom') },
-    phone: DataTypes.STRING,
-    allowed_leaves: { 
-        type: DataTypes.INTEGER, 
-        defaultValue: 12 
-    },
-    taken_leaves: { 
-        type: DataTypes.INTEGER, 
-        defaultValue: 0 
-    },
-    status: { 
-        type: DataTypes.ENUM('active', 'on-leave', 'inactive'), 
-        defaultValue: 'active' 
-    }
-}, {
-    tableName: 'employees',
-    underscored: true,
-    timestamps: true,       
-    updatedAt: false,       
-    createdAt: 'created_at'
-});
-const Attendance = sequelize.define('Attendance', {
-    id: {
-        type: DataTypes.UUID,
-        defaultValue: DataTypes.UUIDV4,
-        primaryKey: true
-    },
-    employee_id: {
-        type: DataTypes.UUID,
-        allowNull: false
-    },
-    date: {
-        type: DataTypes.DATEONLY,
-        allowNull: false,
-        defaultValue: DataTypes.NOW
-    },
-    sign_in: {
-        type: DataTypes.DATE // Stores date and time
-    },
-    sign_out: {
-        type: DataTypes.DATE
-    },
-    status: {
-        type: DataTypes.ENUM('present', 'late', 'absent', 'on-leave'),
-        defaultValue: 'present'
-    },
-    total_hours: {
-        type: DataTypes.DECIMAL(5, 2)
-    }
-}, {
-    tableName: 'attendance',
-    timestamps: true,       // Keep timestamps enabled...
-    updatedAt: false,       // ...BUT tell Sequelize "updated_at" does not exist
-    createdAt: 'created_at'
-});
-// === DATABASE RELATIONSHIPS ===
-// This allows you to fetch an Attendance record AND see who the Employee is automatically
-Employee.hasMany(Attendance, { foreignKey: 'employee_id' });
-Attendance.belongsTo(Employee, { foreignKey: 'employee_id' });
-
-const LeaveRequest = sequelize.define('LeaveRequest', {
-    id: {
-        type: DataTypes.UUID,
-        defaultValue: DataTypes.UUIDV4,
-        primaryKey: true
-    },
-    employee_id: {
-        type: DataTypes.UUID,
-        allowNull: false
-    },
-    leave_type: {
-        type: DataTypes.ENUM('planned', 'happy', 'medical'), 
-        allowNull: false
-    },
-    start_date: {
-        type: DataTypes.DATEONLY,
-        allowNull: false
-    },
-    end_date: {
-        type: DataTypes.DATEONLY,
-        allowNull: false
-    },
-    reason: {
-        type: DataTypes.TEXT
-    },
-    status: {
-        type: DataTypes.ENUM('pending', 'approved', 'rejected'),
-        defaultValue: 'pending'
-    }
-}, {
-    tableName: 'leave_requests',
-   timestamps: true,       // Keep timestamps enabled...
-    updatedAt: false,       // ...BUT tell Sequelize "updated_at" does not exist
-    createdAt: 'created_at'
-});
-
-// === RELATIONSHIPS (Add this near your other relationships) ===
-Employee.hasMany(LeaveRequest, { foreignKey: 'employee_id' });
-LeaveRequest.belongsTo(Employee, { foreignKey: 'employee_id' });
-
-const Holiday = sequelize.define('Holiday', {
-    id: {
-        type: DataTypes.UUID,
-        defaultValue: DataTypes.UUIDV4,
-        primaryKey: true
-    },
-    name: {
-        type: DataTypes.STRING,
-        allowNull: false
-    },
-    date: {
-        type: DataTypes.DATEONLY,
-        allowNull: false
-    },
-    description: {
-        type: DataTypes.TEXT
-    }
-}, {
-    tableName: 'holidays',
-    timestamps: true,       // Keep timestamps enabled...
-    updatedAt: false,       // ...BUT tell Sequelize "updated_at" does not exist
-    createdAt: 'created_at'
-});
-const NewMember = sequelize.define('NewMember', {
-    id: {
-        type: DataTypes.CHAR(36),
-        primaryKey: true,
-        defaultValue: DataTypes.UUIDV4
-    },
-    name: {
-        type: DataTypes.STRING,
-        allowNull: false
-    },
-    number: {
-        type: DataTypes.STRING,
-        allowNull: false
-    }
-}, {
-    tableName: 'new_member',
-    timestamps: true,
-    updatedAt: false, // Matches the SQL above (no updated_at column)
-    createdAt: 'created_at'
-});
+// 2. MODELS
 const Admin = sequelize.define('Admin', {
     id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
     email: { type: DataTypes.STRING, allowNull: false, unique: true },
     password: { type: DataTypes.STRING, allowNull: false }
-}, {
-    tableName: 'admins',
-    timestamps: false  // This tells Sequelize NOT to look for or create created_at/updated_at
-});
+}, { tableName: 'admins', underscored: true, timestamps: false });
+
+const Employee = sequelize.define('Employee', {
+    id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    admin_id: { type: DataTypes.UUID, allowNull: true },
+    full_name: { type: DataTypes.STRING, allowNull: false },
+    email: { type: DataTypes.STRING, unique: true },
+    phone: { type: DataTypes.STRING, unique: true },
+    otp: { type: DataTypes.STRING },
+    joining_date: { type: DataTypes.DATEONLY, allowNull: false },
+    employment_type: { type: DataTypes.ENUM('hourly', 'daily', 'weekly', 'monthly'), defaultValue: 'monthly' },
+    work_rate: { type: DataTypes.DECIMAL(12, 2), defaultValue: 0 },
+    month_calculation_type: { type: DataTypes.ENUM('calendar', 'fixed_26'), defaultValue: 'calendar' },
+    is_pf_enabled: { type: DataTypes.BOOLEAN, defaultValue: false },
+    is_esi_enabled: { type: DataTypes.BOOLEAN, defaultValue: false },
+    is_tds_enabled: { type: DataTypes.BOOLEAN, defaultValue: false },
+    position: DataTypes.STRING,
+    department: DataTypes.STRING,
+    status: { type: DataTypes.ENUM('active', 'on-leave', 'inactive'), defaultValue: 'active' },
+    allowed_leaves: { type: DataTypes.INTEGER, defaultValue: 12 },
+    taken_leaves: { type: DataTypes.INTEGER, defaultValue: 0 }
+}, { tableName: 'employees', underscored: true, timestamps: true, createdAt: 'created_at', updatedAt: false });
+
+const Attendance = sequelize.define('Attendance', {
+    id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    employee_id: { type: DataTypes.UUID, allowNull: false },
+    date: { type: DataTypes.DATEONLY, allowNull: false, defaultValue: DataTypes.NOW },
+    sign_in: { type: DataTypes.DATE },
+    sign_out: { type: DataTypes.DATE },
+    status: { type: DataTypes.ENUM('present', 'late', 'absent', 'on-leave'), defaultValue: 'present' },
+    total_hours: { type: DataTypes.DECIMAL(5, 2) }
+}, { tableName: 'attendance', underscored: true, timestamps: true, createdAt: 'created_at', updatedAt: false });
+
+const LeaveRequest = sequelize.define('LeaveRequest', {
+    id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    employee_id: { type: DataTypes.UUID, allowNull: false },
+    leave_type: { type: DataTypes.ENUM('planned', 'happy', 'medical'), allowNull: false },
+    start_date: { type: DataTypes.DATEONLY, allowNull: false },
+    end_date: { type: DataTypes.DATEONLY, allowNull: false },
+    reason: { type: DataTypes.TEXT },
+    status: { type: DataTypes.ENUM('pending', 'approved', 'rejected'), defaultValue: 'pending' }
+}, { tableName: 'leave_requests', underscored: true, timestamps: true, createdAt: 'created_at', updatedAt: false });
+
+const Member = sequelize.define('Member', {
+    id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    admin_id: { type: DataTypes.UUID },
+    name: { type: DataTypes.STRING, allowNull: false },
+    number: { type: DataTypes.STRING },
+    status: { type: DataTypes.ENUM('pending', 'approved', 'rejected'), defaultValue: 'pending' }
+}, { tableName: 'members', underscored: true, timestamps: true, createdAt: 'created_at', updatedAt: false });
 
 const BreakRecord = sequelize.define('BreakRecord', {
-    id: {
-        type: DataTypes.UUID,
-        defaultValue: DataTypes.UUIDV4,
-        primaryKey: true
-    },
-    employee_id: {
-        type: DataTypes.UUID,
-        allowNull: false
-    },
-    date: {
-        type: DataTypes.DATEONLY,
-        defaultValue: DataTypes.NOW
-    },
-    start_time: {
-        type: DataTypes.DATE, // Timestamp when break started
-        allowNull: false
-    },
-    end_time: {
-        type: DataTypes.DATE // Timestamp when break ended
-    },
-    duration_minutes: {
-        type: DataTypes.INTEGER // Calculated total minutes of the break
-    },
-    type: {
-        type: DataTypes.STRING, // Optional: "Lunch", "Tea", etc.
-        defaultValue: 'General'
-    }
-}, {
-    tableName: 'break_records',
-    timestamps: true,
-    updatedAt: false,
-    createdAt: 'created_at',
-    underscored: true
-});
+    id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    employee_id: { type: DataTypes.UUID, allowNull: false },
+    date: { type: DataTypes.DATEONLY, defaultValue: DataTypes.NOW },
+    start_time: { type: DataTypes.DATE, allowNull: false },
+    end_time: { type: DataTypes.DATE },
+    duration_minutes: { type: DataTypes.INTEGER },
+    type: { type: DataTypes.STRING, defaultValue: 'General' }
+}, { tableName: 'break_records', underscored: true, timestamps: true, createdAt: 'created_at', updatedAt: false });
 
-// === ADD RELATIONSHIPS ===
+const Holiday = sequelize.define('Holiday', {
+    id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    name: { type: DataTypes.STRING, allowNull: false },
+    date: { type: DataTypes.DATEONLY, allowNull: false },
+    description: { type: DataTypes.TEXT }
+}, { tableName: 'holidays', underscored: true, timestamps: true, createdAt: 'created_at', updatedAt: false });
+
+const PayrollRecord = sequelize.define('PayrollRecord', {
+    id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    employee_id: { type: DataTypes.UUID, allowNull: false },
+    month: { type: DataTypes.INTEGER, allowNull: false },
+    year: { type: DataTypes.INTEGER, allowNull: false },
+    present_days: { type: DataTypes.INTEGER, defaultValue: 0 },
+    gross_salary: { type: DataTypes.DECIMAL(12, 2), defaultValue: 0 },
+    net_payable: { type: DataTypes.DECIMAL(12, 2), defaultValue: 0 },
+    status: { type: DataTypes.ENUM('draft', 'approved', 'paid'), defaultValue: 'draft' }
+}, { tableName: 'payroll_records', underscored: true, timestamps: true, createdAt: 'created_at', updatedAt: false });
+
+// 3. RELATIONSHIPS
+Employee.hasMany(Attendance, { foreignKey: 'employee_id' });
+Attendance.belongsTo(Employee, { foreignKey: 'employee_id' });
+Employee.hasMany(LeaveRequest, { foreignKey: 'employee_id' });
+LeaveRequest.belongsTo(Employee, { foreignKey: 'employee_id' });
 Employee.hasMany(BreakRecord, { foreignKey: 'employee_id' });
 BreakRecord.belongsTo(Employee, { foreignKey: 'employee_id' });
-// MIDDLEWARE: Verifies if the user is the Owner
+Employee.hasMany(PayrollRecord, { foreignKey: 'employee_id' });
+PayrollRecord.belongsTo(Employee, { foreignKey: 'employee_id' });
+
+// 4. AUTH MIDDLEWARE
 const verifyOwner = (req, res, next) => {
-    const token = req.headers['authorization'];
+    const token = req.headers['authorization']?.split(' ')[1];
     if (!token) return res.status(403).json({ error: 'No token provided' });
-
-    // Remove "Bearer " prefix if present
-    const cleanToken = token.startsWith('Bearer ') ? token.slice(7, token.length) : token;
-
-    jwt.verify(cleanToken, SECRET_KEY, (err, decoded) => {
-        if (err) return res.status(401).json({ error: 'Unauthorized: Invalid Token' });
+    jwt.verify(token, SECRET_KEY, (err, decoded) => {
+        if (err) return res.status(401).json({ error: 'Unauthorized' });
         req.adminId = decoded.id;
         next();
     });
 };
 
-// 5. API ROUTES
-// Get All
-// === AUTH ROUTES ===
+// 5. ROUTES
 
-// --- API 1: SEND OTP (Strict Check: Name + Phone + Email) ---
-// --- API 1: SEND OTP (TESTING MODE - NO EMAIL) ---
-app.post('/api/auth/send-otp', async (req, res) => {
-  try {
-    const { name, phone, email } = req.body;
-
-    // 1. Validate Input
-    if (!name || !phone || !email) {
-        return res.status(400).json({ error: 'Please provide Name, Phone, and Email.' });
-    }
-
-    // 2. Find user matching credentials
-    const user = await Employee.findOne({ 
-      where: { 
-        phone: phone,
-        email: email, 
-        full_name: name 
-      } 
-    });
-
-    if (!user) {
-      return res.status(404).json({ error: 'User details do not match our records.' });
-    }
-
-    // 3. HARDCODED OTP (Bypassing Email Service)
-    const otp = '52050'; 
-    
-    // Save '52050' to the database so the Verify API accepts it
-    user.otp = otp;
-    await user.save();
-
-    console.log(`>> TEST MODE: OTP for ${user.full_name} set to ${otp}`);
-
-    // 4. Return Success immediately
-    // The frontend thinks an email was sent and will ask for the code.
-    res.json({ message: 'OTP sent successfully!' });
-
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
+// --- DASHBOARD STATS ---
+app.get('/dashboard/stats', verifyOwner, async (req, res) => {
+    const today = new Date().toISOString().split('T')[0];
+    const [totalEmployees, activeEmployees, presentToday, lateToday, pendingLeaves, pendingMembers, onLeaveToday] = await Promise.all([
+        Employee.count({ where: { admin_id: req.adminId } }),
+        Employee.count({ where: { admin_id: req.adminId, status: 'active' } }),
+        Attendance.count({ include: [{ model: Employee, where: { admin_id: req.adminId } }], where: { date: today, status: 'present' } }),
+        Attendance.count({ include: [{ model: Employee, where: { admin_id: req.adminId } }], where: { date: today, status: 'late' } }),
+        LeaveRequest.count({ include: [{ model: Employee, where: { admin_id: req.adminId } }], where: { status: 'pending' } }),
+        Member.count({ where: { admin_id: req.adminId, status: 'pending' } }),
+        Employee.count({ where: { admin_id: req.adminId, status: 'on-leave' } })
+    ]);
+    res.json({ totalEmployees, activeEmployees, presentToday, lateToday, absentToday: activeEmployees - presentToday - lateToday - onLeaveToday, onLeaveToday, pendingLeaveRequests: pendingLeaves, pendingNewEmployees: pendingMembers });
 });
-// --- API 2: VERIFY OTP (Check Phone & OTP) ---
-app.post('/api/auth/verify-otp', async (req, res) => {
-  try {
-    const { phone, otp } = req.body;
 
-    // 1. Find User by Phone (Unique)
-    const user = await Employee.findOne({ where: { phone } });
-    
-    if (!user) {
-      return res.status(404).json({ error: 'User not found' });
-    }
-
-    // 2. Verify OTP
-    if (String(user.otp) !== String(otp)) {
-      return res.status(400).json({ error: 'Invalid OTP' });
-    }
-
-    // 3. Success - Clear OTP and return user
-    user.otp = null;
-    await user.save();
-
-    res.json({ message: 'Login successful', user });
-
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-// 1. REGISTER OWNER (Run this ONCE in Postman to create your account)
+// --- ADMIN AUTH ---
 app.post('/api/auth/register', async (req, res) => {
+    const { email, password } = req.body;
     try {
-        const { email, password } = req.body;
-        // Encrypt password
         const hashedPassword = await bcrypt.hash(password, 10);
         const admin = await Admin.create({ email, password: hashedPassword });
-        res.json({ message: 'Owner account created', adminId: admin.id });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
+        res.json({ message: 'Owner registered', adminId: admin.id });
+    } catch (e) { res.status(400).json({ error: 'Email already exists' }); }
 });
 
-// 2. LOGIN (Use this to get your Access Token)
 app.post('/api/auth/login', async (req, res) => {
-    try {
-        const { email, password } = req.body;
-        const admin = await Admin.findOne({ where: { email } });
-        
-        // Check if user exists AND password matches
-        if (!admin || !(await bcrypt.compare(password, admin.password))) {
-            return res.status(401).json({ error: 'Invalid email or password' });
-        }
-
-        // Generate Token
+    const { email, password } = req.body;
+    const admin = await Admin.findOne({ where: { email } });
+    if (admin && await bcrypt.compare(password, admin.password)) {
         const token = jwt.sign({ id: admin.id, role: 'owner' }, SECRET_KEY, { expiresIn: '12h' });
-        res.json({ message: 'Login successful', token });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
+        res.json({ token });
+    } else { res.status(401).json({ error: 'Invalid credentials' }); }
 });
 
+// --- EMPLOYEES ---
 app.get('/api/employees', verifyOwner, async (req, res) => {
-    try {
-        const employees = await Employee.findAll({ order: [['created_at', 'DESC']] });
-        res.json(employees);
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-});
-app.get('/api/employees/verify/:phone', async (req, res) => {
-    const employee = await Employee.findOne({ where: { phone: req.params.phone } });
-    employee ? res.json(employee) : res.status(404).json({ error: 'Not found' });
-});
-// Create
-app.post('/api/employees', async (req, res) => {
-    try {
-        const newEmp = await Employee.create(req.body);
-        res.status(201).json({ message: 'Created', data: newEmp });
-    } catch (error) {
-        res.status(400).json({ error: error.message });
-    }
+    const emps = await Employee.findAll({ where: { admin_id: req.adminId }, order: [['created_at', 'DESC']] });
+    res.json(emps);
 });
 
-// Update
-app.put('/api/employees/:id', async (req, res) => {
-    try {
-        const [updated] = await Employee.update(req.body, { where: { id: req.params.id } });
-        if (updated) {
-            const emp = await Employee.findByPk(req.params.id);
-            res.json({ message: 'Updated', data: emp });
-        } else {
-            res.status(404).json({ error: 'Not found' });
-        }
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
+app.get('/api/employees/:id', verifyOwner, async (req, res) => {
+    const emp = await Employee.findOne({ where: { id: req.params.id, admin_id: req.adminId } });
+    emp ? res.json(emp) : res.status(404).json({ error: 'Not found' });
 });
 
-// Delete
-app.delete('/api/employees/:id', async (req, res) => {
-    try {
-        const deleted = await Employee.destroy({ where: { id: req.params.id } });
-        deleted ? res.json({ message: 'Deleted' }) : res.status(404).json({ error: 'Not found' });
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
+app.post('/api/employees', verifyOwner, async (req, res) => {
+    const newEmp = await Employee.create({ ...req.body, admin_id: req.adminId });
+    res.json(newEmp);
 });
+
+app.put('/api/employees/:id', verifyOwner, async (req, res) => {
+    await Employee.update(req.body, { where: { id: req.params.id, admin_id: req.adminId } });
+    res.json({ success: true });
+});
+
+app.delete('/api/employees/:id', verifyOwner, async (req, res) => {
+    await Employee.destroy({ where: { id: req.params.id, admin_id: req.adminId } });
+    res.json({ success: true });
+});
+
+// --- ATTENDANCE ---
+app.get('/api/attendance', verifyOwner, async (req, res) => {
+    const records = await Attendance.findAll({
+        include: [{ model: Employee, where: { admin_id: req.adminId }, attributes: ['full_name', 'department'] }],
+        order: [['date', 'DESC']]
+    });
+    res.json(records);
+});
+
 app.post('/api/attendance/clock-in', async (req, res) => {
-    try {
-        const { employee_id } = req.body;
-
-        // 1. Check if they already clocked in today
-        const existing = await Attendance.findOne({
-            where: {
-                employee_id: employee_id,
-                date: new Date() // Checks for today's date
-            }
-        });
-
-        if (existing) {
-            return res.status(400).json({ error: 'Employee already clocked in today' });
-        }
-
-        // 2. Create the Clock In Record
-        const newRecord = await Attendance.create({
-            employee_id: employee_id,
-            date: new Date(),
-            sign_in: new Date(), // Current timestamp
-            status: 'present'
-        });
-
-        res.status(201).json({ message: 'Clocked In Successfully', data: newRecord });
-
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
+    const { employee_id } = req.body;
+    const today = new Date().toISOString().split('T')[0];
+    const [record, created] = await Attendance.findOrCreate({
+        where: { employee_id, date: today },
+        defaults: { sign_in: new Date(), status: 'present' }
+    });
+    created ? res.json(record) : res.status(400).json({ error: 'Already clocked in' });
 });
+
 app.put('/api/attendance/clock-out', async (req, res) => {
-    try {
-        const { employee_id } = req.body;
-
-        // 1. Find the open attendance record for today (where sign_out is NULL)
-        const record = await Attendance.findOne({
-            where: {
-                employee_id: employee_id,
-                date: new Date(),
-                sign_out: null // Only find records where they haven't left yet
-            }
-        });
-
-        if (!record) {
-            return res.status(404).json({ error: 'No active clock-in found for today' });
-        }
-
-        // 2. Calculate Hours Worked
-        const now = new Date();
-        const signInTime = new Date(record.sign_in);
-        const diffMs = now - signInTime; 
-        const totalHours = (diffMs / (1000 * 60 * 60)).toFixed(2); // Convert ms to hours
-
-        // 3. Update the record
-        record.sign_out = now;
-        record.total_hours = totalHours;
-        await record.save();
-
-        res.json({ message: 'Clocked Out Successfully', total_hours: totalHours, data: record });
-
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
+    const { employee_id } = req.body;
+    const record = await Attendance.findOne({ where: { employee_id, date: new Date().toISOString().split('T')[0], sign_out: null } });
+    if (!record) return res.status(404).json({ error: 'No active session' });
+    const now = new Date();
+    const diff = (now - new Date(record.sign_in)) / (1000 * 60 * 60);
+    await record.update({ sign_out: now, total_hours: diff.toFixed(2) });
+    res.json(record);
 });
-app.get('/api/attendance', async (req, res) => {
-    try {
-        const logs = await Attendance.findAll({
-            include: [{
-                model: Employee,
-                attributes: ['full_name', 'position', 'department'] // Only pick specific fields
-            }],
-            order: [['date', 'DESC'], ['sign_in', 'DESC']]
-        });
-        res.json(logs);
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
+
+// --- LEAVES ---
+app.post('/api/leaves', verifyOwner, async (req, res) => {
+    const leave = await LeaveRequest.create(req.body);
+    res.json(leave);
 });
-app.post('/api/leaves', async (req, res) => {
-    try {
-        const { employee_id, leave_type, start_date, end_date, reason } = req.body;
 
-        // Basic validation: Ensure End Date is not before Start Date
-        if (new Date(end_date) < new Date(start_date)) {
-            return res.status(400).json({ error: 'End date cannot be before start date' });
-        }
-
-        const newLeave = await LeaveRequest.create({
-            employee_id,
-            leave_type,
-            start_date,
-            end_date,
-            reason,
-            status: 'pending' // Default status
-        });
-
-        res.status(201).json({ message: 'Leave request submitted', data: newLeave });
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
+app.get('/api/leaves', verifyOwner, async (req, res) => {
+    const leaves = await LeaveRequest.findAll({
+        include: [{ model: Employee, where: { admin_id: req.adminId }, attributes: ['full_name', 'department'] }],
+        order: [['created_at', 'DESC']]
+    });
+    res.json(leaves);
 });
-app.get('/api/leaves', async (req, res) => {
-    try {
-        const requests = await LeaveRequest.findAll({
-            include: [{
-                model: Employee,
-                attributes: ['full_name', 'department', 'position'] // Show who asked for leave
-            }],
-            order: [['created_at', 'DESC']] // Newest requests first
-        });
-        res.json(requests);
-    } catch (error) {
-        res.status(500).json({ error: error.message });
+
+app.put('/api/leaves/:id/status', verifyOwner, async (req, res) => {
+    const { status } = req.body;
+    await LeaveRequest.update({ status }, { where: { id: req.params.id } });
+    if (status === 'approved') {
+        const leave = await LeaveRequest.findByPk(req.params.id);
+        await Employee.update({ status: 'on-leave' }, { where: { id: leave.employee_id } });
     }
+    res.json({ success: true });
 });
-app.put('/api/leaves/:id/status', async (req, res) => {
-    try {
-        const { id } = req.params;
-        const { status } = req.body; // Expecting 'approved' or 'rejected'
 
-        const leaveRequest = await LeaveRequest.findByPk(id);
-
-        if (!leaveRequest) {
-            return res.status(404).json({ error: 'Leave request not found' });
-        }
-
-        leaveRequest.status = status;
-        await leaveRequest.save();
-
-        res.json({ message: `Leave request ${status}`, data: leaveRequest });
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
+// --- NEW MEMBER REQUESTS ---
+app.get('/api/members', verifyOwner, async (req, res) => {
+    const members = await Member.findAll({ where: { admin_id: req.adminId }, order: [['created_at', 'DESC']] });
+    res.json(members);
 });
+
+app.post('/api/members/:id/approve', verifyOwner, async (req, res) => {
+    const member = await Member.findByPk(req.params.id);
+    if (!member) return res.status(404).json({ error: 'Not found' });
+    const emp = await Employee.create({ full_name: member.name, phone: member.number, admin_id: req.adminId, joining_date: new Date() });
+    await member.destroy();
+    res.json(emp);
+});
+
+app.post('/api/members/:id/reject', verifyOwner, async (req, res) => {
+    await Member.destroy({ where: { id: req.params.id, admin_id: req.adminId } });
+    res.json({ success: true });
+});
+
+app.delete('/api/members/:id', verifyOwner, async (req, res) => {
+    await Member.destroy({ where: { id: req.params.id, admin_id: req.adminId } });
+    res.json({ success: true });
+});
+
+// --- HOLIDAYS ---
 app.get('/api/holidays', async (req, res) => {
-    try {
-        const holidays = await Holiday.findAll({
-            order: [['date', 'ASC']] // Show upcoming holidays in order
-        });
-        res.json(holidays);
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-});
-app.post('/api/holidays', async (req, res) => {
-    try {
-        const { name, date, description } = req.body;
-        
-        const newHoliday = await Holiday.create({
-            name,
-            date,
-            description
-        });
-
-        res.status(201).json({ message: 'Holiday added', data: newHoliday });
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-});
-app.get('/api/members', async (req, res) => {
-    try {
-        const members = await NewMember.findAll({
-            order: [['created_at', 'DESC']]
-        });
-        res.json(members);
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-});
-app.delete('/api/members/:id', async (req, res) => {
-    try {
-        const { id } = req.params;
-
-        const deleted = await NewMember.destroy({
-            where: { id: id }
-        });
-
-        if (deleted) {
-            res.json({ message: 'Member deleted successfully' });
-        } else {
-            res.status(404).json({ error: 'Member not found' });
-        }
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-});
-app.post('/api/members', async (req, res) => {
-    try {
-        const { name, number } = req.body;
-        
-        // Basic validation
-        if (!name || !number) {
-            return res.status(400).json({ error: 'Name and Number are required' });
-        }
-
-        const member = await NewMember.create({ name, number });
-        res.status(201).json({ message: 'Member added successfully', data: member });
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-});
-app.post('/api/attendance/break/start', async (req, res) => {
-    try {
-        const { employee_id, type } = req.body;
-
-        // 1. Check if they are already on a break (an open record exists)
-        const activeBreak = await BreakRecord.findOne({
-            where: {
-                employee_id,
-                date: new Date(),
-                end_time: null
-            }
-        });
-
-        if (activeBreak) {
-            return res.status(400).json({ error: 'You are already on a break!' });
-        }
-
-        // 2. Start the break
-        const newBreak = await BreakRecord.create({
-            employee_id,
-            start_time: new Date(),
-            date: new Date(),
-            type: type || 'General'
-        });
-
-        res.status(201).json({ message: 'Break started', data: newBreak });
-
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-});
-app.put('/api/attendance/break/end', async (req, res) => {
-    try {
-        const { employee_id } = req.body;
-
-        // 1. Find the active break
-        const activeBreak = await BreakRecord.findOne({
-            where: {
-                employee_id,
-                date: new Date(),
-                end_time: null
-            }
-        });
-
-        if (!activeBreak) {
-            return res.status(404).json({ error: 'No active break found to end' });
-        }
-
-        // 2. Calculate duration
-        const now = new Date();
-        const startTime = new Date(activeBreak.start_time);
-        const diffMs = now - startTime;
-        const minutes = Math.floor(diffMs / 60000); // Convert ms to minutes
-
-        // 3. Update record
-        activeBreak.end_time = now;
-        activeBreak.duration_minutes = minutes;
-        await activeBreak.save();
-
-        res.json({ message: 'Break ended', duration_minutes: minutes, data: activeBreak });
-
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-});
-// 3. Get Today's Breaks (Public - No Login Required)
-app.get('/api/breaks', async (req, res) => {
-    try {
-        const breaks = await BreakRecord.findAll({
-            include: [{ model: Employee, attributes: ['full_name'] }],
-            order: [['start_time', 'DESC']]
-        });
-        res.json(breaks);
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-});
-// In your backend routes
-app.put('/api/holidays/:id', async (req, res) => {
-    try {
-        const { id } = req.params;
-        const { name, date, description } = req.body;
-
-        const holiday = await Holiday.findByPk(id);
-
-        if (!holiday) {
-            return res.status(404).json({ error: 'Holiday not found' });
-        }
-
-        // Update only provided fields
-        if (name !== undefined) holiday.name = name;
-        if (date !== undefined) holiday.date = date;
-        if (description !== undefined) holiday.description = description;
-
-        await holiday.save();
-
-        res.json({
-            message: 'Holiday updated successfully',
-            data: holiday
-        });
-
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
+    const h = await Holiday.findAll({ order: [['date', 'ASC']] });
+    res.json(h);
 });
 
-
-app.delete('/api/holidays/:id', async (req, res) => {
-    try {
-        const { id } = req.params;
-
-        const deleted = await Holiday.destroy({
-            where: { id }
-        });
-
-        if (!deleted) {
-            return res.status(404).json({ error: 'Holiday not found' });
-        }
-
-        res.json({ message: 'Holiday deleted successfully' });
-
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
+app.post('/api/holidays', verifyOwner, async (req, res) => {
+    const h = await Holiday.create(req.body);
+    res.json(h);
 });
 
+app.put('/api/holidays/:id', verifyOwner, async (req, res) => {
+    await Holiday.update(req.body, { where: { id: req.params.id } });
+    res.json({ success: true });
+});
 
-async function startServer() {
+app.delete('/api/holidays/:id', verifyOwner, async (req, res) => {
+    await Holiday.destroy({ where: { id: req.params.id } });
+    res.json({ success: true });
+});
+
+// --- PAYROLL ---
+app.get('/api/payroll/calculate/:month/:year', verifyOwner, async (req, res) => {
+    const { month, year } = req.params;
+    const employees = await Employee.findAll({ 
+        where: { admin_id: req.adminId }, 
+        include: [{ model: Attendance, where: { date: { [Op.like]: `${year}-${month.padStart(2, '0')}%` } }, required: false }] 
+    });
+
+    const payrolls = employees.map(emp => {
+        const presentCount = emp.Attendances.length;
+        const totalDays = emp.month_calculation_type === 'fixed_26' ? 26 : 30;
+        let gross = (Number(emp.work_rate) / totalDays) * presentCount;
+        return { employee_id: emp.id, month, year, present_days: presentCount, gross_salary: gross.toFixed(2), net_payable: gross.toFixed(2) };
+    });
+
+    for (const p of payrolls) { await PayrollRecord.upsert(p); }
+    res.json(payrolls);
+});
+
+// --- BREAKS ---
+app.get('/api/breaks', verifyOwner, async (req, res) => {
+    const breaks = await BreakRecord.findAll({
+        include: [{ model: Employee, where: { admin_id: req.adminId }, attributes: ['full_name'] }],
+        order: [['created_at', 'DESC']]
+    });
+    res.json(breaks);
+});
+
+// START
+async function start() {
     try {
         await sequelize.authenticate();
-        console.log(">> 2. Database Connection Established!");
-        
-        // This is where the magic happens for Hostinger
-     await sequelize.sync();
-        console.log(">> 3. Database Synced.");
-
-    } catch (err) {
-        // If DB fails, we LOG the error but DON'T kill the app
-        console.error(">> ❌ DATABASE ERROR:", err.message);
-        console.log(">> Starting server in limited mode (No DB)...");
-    }
-
-    // This ensures the 503 error disappears
-    app.listen(PORT, () => {
-        console.log(`>> 4. Server is live on port ${PORT}`);
-    });
+        await sequelize.sync();
+        app.listen(PORT, () => console.log(`🚀 Master Server Fully Ready on Port ${PORT}`));
+    } catch (e) { console.error(e); }
 }
 
-startServer();
+start();
