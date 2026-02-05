@@ -343,7 +343,7 @@ app.post('/api/auth/send-otp', async (req, res) => {
     try {
         const emp = await Employee.findOne({ where: { phone } });
         if (!emp) return res.status(404).json({ error: 'Employee not found' });
-        const mockOtp = '123456'; 
+        const mockOtp = '52050'; 
         await emp.update({ otp: mockOtp });
         res.json({ success: true, message: 'OTP sent successfully' });
     } catch (e) { res.status(500).json({ error: e.message }); }
