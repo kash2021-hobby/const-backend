@@ -379,6 +379,42 @@ app.get('/api/my-leaves/:employee_id', async (req, res) => {
     });
     res.json(leaves);
 });
+// Start break
+app.post('/api/attendance/break/start', async (req, res) => {
+    const { employee_id, type } = req.body;
+    const today = new Date().toISOString().split('T')[0];
+    const breakRecord = await BreakRecord.create({
+        employee_id,
+        date: today,
+        start_time: new Date(),
+        type: type || 'General'
+    });
+    res.json(breakRecord);
+});
+
+// End break
+app.put('/api/attendance/break/end', async (req, res) => {
+    const { employee_id } = req.body;
+    const today = new Date().toISOString().split('T')[0];
+    const breakRecord = await BreakRecord.findOne({
+        where: { employee_id, date: today, end_time: null }
+    });
+    if (!breakRecord) return res.status(404).json({ error: 'No active break' });
+    const now = new Date();
+    const duration = Math.floor((now - new Date(breakRecord.start_time)) / 60000);
+    await breakRecord.update({ end_time: now, duration_minutes: duration });
+    res.json(breakRecord);
+});
+
+// Get breaks (for mobile - no auth required)
+app.get('/api/my-breaks/:employee_id', async (req, res) => {
+    const breaks = await BreakRecord.findAll({
+        where: { employee_id: req.params.employee_id },
+        order: [['created_at', 'DESC']],
+        limit: 30
+    });
+    res.json(breaks);
+});
 
 // START
 async function start() {
