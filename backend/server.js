@@ -331,80 +331,163 @@ app.get('/api/breaks', verifyOwner, async (req, res) => {
 
 // --- MOBILE APP SPECIFIC ---
 app.get('/api/employees/verify/:phone', async (req, res) => {
-    try {
-        const emp = await Employee.findOne({ where: { phone: req.params.phone } });
-        if (!emp) return res.status(404).json({ error: 'Employee not found' });
-        res.json({ id: emp.id, full_name: emp.full_name, allowed_leaves: emp.allowed_leaves, taken_leaves: emp.taken_leaves });
-    } catch (e) { res.status(500).json({ error: e.message }); }
+  try {
+    const phone = normalizePhone(req.params.phone);
+
+    const emp = await Employee.findOne({ where: { phone } });
+    if (!emp) {
+      return res.status(404).json({ error: 'Employee not found' });
+    }
+
+    res.json({
+      id: emp.id,
+      full_name: emp.full_name,
+      allowed_leaves: emp.allowed_leaves,
+      taken_leaves: emp.taken_leaves
+    });
+  } catch (e) {
+    res.status(500).json({ error: 'Server error' });
+  }
 });
 
+
 app.post('/api/auth/send-otp', async (req, res) => {
-    const { phone } = req.body;
-    try {
-        const emp = await Employee.findOne({ where: { phone } });
-        if (!emp) return res.status(404).json({ error: 'Employee not found' });
-        const mockOtp = '52050'; 
-        await emp.update({ otp: mockOtp });
-        res.json({ success: true, message: 'OTP sent successfully' });
-    } catch (e) { res.status(500).json({ error: e.message }); }
+  try {
+    const phone = normalizePhone(req.body.phone);
+
+    const emp = await Employee.findOne({ where: { phone } });
+    if (!emp) {
+      return res.status(404).json({ error: 'Employee not found' });
+    }
+
+    const otp = '52050'; // replace with real generator later
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 mins
+
+    await emp.update({
+      otp,
+      otp_expires_at: expiresAt
+    });
+
+    res.json({ success: true, message: 'OTP sent successfully' });
+  } catch (e) {
+    res.status(500).json({ error: 'Server error' });
+  }
 });
 
 app.post('/api/auth/verify-otp', async (req, res) => {
-    const { phone, email, otp } = req.body;
-    try {
-        const emp = await Employee.findOne({ where: { [Op.or]: [{ phone }, { email }] } });
-        if (emp && (emp.otp === otp || otp === '123456')) {
-            const token = jwt.sign({ id: emp.id, role: 'employee' }, SECRET_KEY, { expiresIn: '30d' });
-            await emp.update({ otp: null });
-            res.json({ success: true, token, user: emp });
-        } else {
-            res.status(401).json({ error: 'Invalid OTP' });
-        }
-    } catch (e) { res.status(500).json({ error: e.message }); }
+  try {
+    const phone = normalizePhone(req.body.phone);
+    const email = req.body.email?.trim().toLowerCase();
+    const otp = req.body.otp;
+
+    const emp = await Employee.findOne({
+      where: { phone }
+    });
+
+    if (!emp) {
+      return res.status(404).json({ error: 'Employee not found' });
+    }
+
+    if (emp.email && emp.email.toLowerCase() !== email) {
+      return res.status(401).json({ error: 'Email does not match employee' });
+    }
+
+    if (!emp.otp || emp.otp !== otp) {
+      return res.status(401).json({ error: 'Invalid OTP' });
+    }
+
+    if (emp.otp_expires_at && new Date() > emp.otp_expires_at) {
+      return res.status(401).json({ error: 'OTP expired' });
+    }
+
+    const token = jwt.sign(
+      { id: emp.id, role: 'employee' },
+      SECRET_KEY,
+      { expiresIn: '30d' }
+    );
+
+    await emp.update({
+      otp: null,
+      otp_expires_at: null
+    });
+
+    res.json({
+      success: true,
+      token,
+      user: emp
+    });
+  } catch (e) {
+    res.status(500).json({ error: 'Server error' });
+  }
 });
+
 
 app.get('/api/my-attendance/:employee_id', async (req, res) => {
-    const records = await Attendance.findAll({
-        where: { employee_id: req.params.employee_id },
-        order: [['date', 'DESC']],
-        limit: 30
-    });
-    res.json(records);
+  const records = await Attendance.findAll({
+    where: { employee_id: req.params.employee_id },
+    order: [['date', 'DESC']],
+    limit: 30
+  });
+  res.json(records);
 });
+
 
 app.get('/api/my-leaves/:employee_id', async (req, res) => {
-    const leaves = await LeaveRequest.findAll({
-        where: { employee_id: req.params.employee_id },
-        order: [['created_at', 'DESC']]
-    });
-    res.json(leaves);
-});
-// Start break
-app.post('/api/attendance/break/start', async (req, res) => {
-    const { employee_id, type } = req.body;
-    const today = new Date().toISOString().split('T')[0];
-    const breakRecord = await BreakRecord.create({
-        employee_id,
-        date: today,
-        start_time: new Date(),
-        type: type || 'General'
-    });
-    res.json(breakRecord);
+  const leaves = await LeaveRequest.findAll({
+    where: { employee_id: req.params.employee_id },
+    order: [['created_at', 'DESC']]
+  });
+  res.json(leaves);
 });
 
+// Start break
+app.post('/api/attendance/break/start', async (req, res) => {
+  const { employee_id, type } = req.body;
+  const today = new Date().toISOString().split('T')[0];
+
+  const existing = await BreakRecord.findOne({
+    where: { employee_id, date: today, end_time: null }
+  });
+
+  if (existing) {
+    return res.status(400).json({ error: 'Break already active' });
+  }
+
+  const breakRecord = await BreakRecord.create({
+    employee_id,
+    date: today,
+    start_time: new Date(),
+    type: type || 'General'
+  });
+
+  res.json(breakRecord);
+});
 // End break
 app.put('/api/attendance/break/end', async (req, res) => {
-    const { employee_id } = req.body;
-    const today = new Date().toISOString().split('T')[0];
-    const breakRecord = await BreakRecord.findOne({
-        where: { employee_id, date: today, end_time: null }
-    });
-    if (!breakRecord) return res.status(404).json({ error: 'No active break' });
-    const now = new Date();
-    const duration = Math.floor((now - new Date(breakRecord.start_time)) / 60000);
-    await breakRecord.update({ end_time: now, duration_minutes: duration });
-    res.json(breakRecord);
+  const { employee_id } = req.body;
+  const today = new Date().toISOString().split('T')[0];
+
+  const breakRecord = await BreakRecord.findOne({
+    where: { employee_id, date: today, end_time: null }
+  });
+
+  if (!breakRecord) {
+    return res.status(404).json({ error: 'No active break' });
+  }
+
+  const now = new Date();
+  const duration = Math.floor(
+    (now - new Date(breakRecord.start_time)) / 60000
+  );
+
+  await breakRecord.update({
+    end_time: now,
+    duration_minutes: duration
+  });
+
+  res.json(breakRecord);
 });
+
 
 // Get breaks (for mobile - no auth required)
 app.get('/api/my-breaks/:employee_id', async (req, res) => {
