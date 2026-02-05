@@ -33,7 +33,6 @@ const Admin = sequelize.define('Admin', {
 
 const Employee = sequelize.define('Employee', {
     id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
-    admin_id: { type: DataTypes.UUID, allowNull: true },
     full_name: { type: DataTypes.STRING, allowNull: false },
     email: { type: DataTypes.STRING, unique: true },
     phone: { type: DataTypes.STRING, unique: true },
@@ -74,7 +73,6 @@ const LeaveRequest = sequelize.define('LeaveRequest', {
 
 const Member = sequelize.define('Member', {
     id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
-    admin_id: { type: DataTypes.UUID },
     name: { type: DataTypes.STRING, allowNull: false },
     number: { type: DataTypes.STRING },
     status: { type: DataTypes.ENUM('pending', 'approved', 'rejected'), defaultValue: 'pending' }
@@ -135,13 +133,13 @@ const verifyOwner = (req, res, next) => {
 app.get('/dashboard/stats', verifyOwner, async (req, res) => {
     const today = new Date().toISOString().split('T')[0];
     const [totalEmployees, activeEmployees, presentToday, lateToday, pendingLeaves, pendingMembers, onLeaveToday] = await Promise.all([
-        Employee.count({ where: { admin_id: req.adminId } }),
-        Employee.count({ where: { admin_id: req.adminId, status: 'active' } }),
-        Attendance.count({ include: [{ model: Employee, where: { admin_id: req.adminId } }], where: { date: today, status: 'present' } }),
-        Attendance.count({ include: [{ model: Employee, where: { admin_id: req.adminId } }], where: { date: today, status: 'late' } }),
-        LeaveRequest.count({ include: [{ model: Employee, where: { admin_id: req.adminId } }], where: { status: 'pending' } }),
-        Member.count({ where: { admin_id: req.adminId, status: 'pending' } }),
-        Employee.count({ where: { admin_id: req.adminId, status: 'on-leave' } })
+        Employee.count(),
+        Employee.count({ where: { status: 'active' } }),
+        Attendance.count({ where: { date: today, status: 'present' } }),
+        Attendance.count({ where: { date: today, status: 'late' } }),
+        LeaveRequest.count({ where: { status: 'pending' } }),
+        Member.count({ where: { status: 'pending' } }),
+        Employee.count({ where: { status: 'on-leave' } })
     ]);
     res.json({ totalEmployees, activeEmployees, presentToday, lateToday, absentToday: activeEmployees - presentToday - lateToday - onLeaveToday, onLeaveToday, pendingLeaveRequests: pendingLeaves, pendingNewEmployees: pendingMembers });
 });
@@ -167,34 +165,36 @@ app.post('/api/auth/login', async (req, res) => {
 
 // --- EMPLOYEES ---
 app.get('/api/employees', verifyOwner, async (req, res) => {
-    const emps = await Employee.findAll({ where: { admin_id: req.adminId }, order: [['created_at', 'DESC']] });
+    const emps = await Employee.findAll({ order: [['created_at', 'DESC']] });
     res.json(emps);
 });
 
 app.get('/api/employees/:id', verifyOwner, async (req, res) => {
-    const emp = await Employee.findOne({ where: { id: req.params.id, admin_id: req.adminId } });
+    const emp = await Employee.findByPk(req.params.id);
     emp ? res.json(emp) : res.status(404).json({ error: 'Not found' });
 });
 
 app.post('/api/employees', verifyOwner, async (req, res) => {
-    const newEmp = await Employee.create({ ...req.body, admin_id: req.adminId });
-    res.json(newEmp);
+    try {
+        const newEmp = await Employee.create(req.body);
+        res.json(newEmp);
+    } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
 app.put('/api/employees/:id', verifyOwner, async (req, res) => {
-    await Employee.update(req.body, { where: { id: req.params.id, admin_id: req.adminId } });
+    await Employee.update(req.body, { where: { id: req.params.id } });
     res.json({ success: true });
 });
 
 app.delete('/api/employees/:id', verifyOwner, async (req, res) => {
-    await Employee.destroy({ where: { id: req.params.id, admin_id: req.adminId } });
+    await Employee.destroy({ where: { id: req.params.id } });
     res.json({ success: true });
 });
 
 // --- ATTENDANCE ---
 app.get('/api/attendance', verifyOwner, async (req, res) => {
     const records = await Attendance.findAll({
-        include: [{ model: Employee, where: { admin_id: req.adminId }, attributes: ['full_name', 'department'] }],
+        include: [{ model: Employee, attributes: ['full_name', 'department'] }],
         order: [['date', 'DESC']]
     });
     res.json(records);
@@ -221,14 +221,14 @@ app.put('/api/attendance/clock-out', async (req, res) => {
 });
 
 // --- LEAVES ---
-app.post('/api/leaves', verifyOwner, async (req, res) => {
+app.post('/api/leaves', async (req, res) => {
     const leave = await LeaveRequest.create(req.body);
     res.json(leave);
 });
 
 app.get('/api/leaves', verifyOwner, async (req, res) => {
     const leaves = await LeaveRequest.findAll({
-        include: [{ model: Employee, where: { admin_id: req.adminId }, attributes: ['full_name', 'department'] }],
+        include: [{ model: Employee, attributes: ['full_name', 'department'] }],
         order: [['created_at', 'DESC']]
     });
     res.json(leaves);
@@ -246,25 +246,25 @@ app.put('/api/leaves/:id/status', verifyOwner, async (req, res) => {
 
 // --- NEW MEMBER REQUESTS ---
 app.get('/api/members', verifyOwner, async (req, res) => {
-    const members = await Member.findAll({ where: { admin_id: req.adminId }, order: [['created_at', 'DESC']] });
+    const members = await Member.findAll({ order: [['created_at', 'DESC']] });
     res.json(members);
 });
 
 app.post('/api/members/:id/approve', verifyOwner, async (req, res) => {
     const member = await Member.findByPk(req.params.id);
     if (!member) return res.status(404).json({ error: 'Not found' });
-    const emp = await Employee.create({ full_name: member.name, phone: member.number, admin_id: req.adminId, joining_date: new Date() });
+    const emp = await Employee.create({ full_name: member.name, phone: member.number, joining_date: new Date() });
     await member.destroy();
     res.json(emp);
 });
 
 app.post('/api/members/:id/reject', verifyOwner, async (req, res) => {
-    await Member.destroy({ where: { id: req.params.id, admin_id: req.adminId } });
+    await Member.destroy({ where: { id: req.params.id } });
     res.json({ success: true });
 });
 
 app.delete('/api/members/:id', verifyOwner, async (req, res) => {
-    await Member.destroy({ where: { id: req.params.id, admin_id: req.adminId } });
+    await Member.destroy({ where: { id: req.params.id } });
     res.json({ success: true });
 });
 
@@ -293,128 +293,99 @@ app.delete('/api/holidays/:id', verifyOwner, async (req, res) => {
 app.get('/api/payroll/calculate/:month/:year', verifyOwner, async (req, res) => {
     const { month, year } = req.params;
     const employees = await Employee.findAll({ 
-        where: { admin_id: req.adminId }, 
-        include: [{ model: Attendance, where: { date: { [Op.like]: `${year}-${month.padStart(2, '0')}%` } }, required: false }] 
+        include: [{ 
+            model: Attendance, 
+            where: { date: { [Op.like]: `${year}-${month.padStart(2, '0')}%` } }, 
+            required: false 
+        }] 
     });
 
     const payrolls = employees.map(emp => {
         const presentCount = emp.Attendances.length;
         const totalDays = emp.month_calculation_type === 'fixed_26' ? 26 : 30;
         let gross = (Number(emp.work_rate) / totalDays) * presentCount;
-        return { employee_id: emp.id, month, year, present_days: presentCount, gross_salary: gross.toFixed(2), net_payable: gross.toFixed(2) };
+        return { 
+            employee_id: emp.id, 
+            month: parseInt(month), 
+            year: parseInt(year), 
+            present_days: presentCount, 
+            gross_salary: gross.toFixed(2), 
+            net_payable: gross.toFixed(2) 
+        };
     });
 
-    for (const p of payrolls) { await PayrollRecord.upsert(p); }
+    for (const p of payrolls) { 
+        await PayrollRecord.upsert(p); 
+    }
     res.json(payrolls);
 });
 
 // --- BREAKS ---
 app.get('/api/breaks', verifyOwner, async (req, res) => {
     const breaks = await BreakRecord.findAll({
-        include: [{ model: Employee, where: { admin_id: req.adminId }, attributes: ['full_name'] }],
+        include: [{ model: Employee, attributes: ['full_name'] }],
         order: [['created_at', 'DESC']]
     });
     res.json(breaks);
 });
-// =============================================================
-// 🚀 MISSING ROUTES FOR EMPLOYEE MOBILE APP
-// =============================================================
 
-// 1. PUBLIC: Verify Employee Exists (For Login Stage 1)
+// --- MOBILE APP SPECIFIC ---
 app.get('/api/employees/verify/:phone', async (req, res) => {
     try {
         const emp = await Employee.findOne({ where: { phone: req.params.phone } });
         if (!emp) return res.status(404).json({ error: 'Employee not found' });
-        
-        // Return only necessary info, not full profile yet
-        res.json({ 
-            id: emp.id, 
-            full_name: emp.full_name, 
-            allowed_leaves: emp.allowed_leaves, 
-            taken_leaves: emp.taken_leaves 
-        });
+        res.json({ id: emp.id, full_name: emp.full_name, allowed_leaves: emp.allowed_leaves, taken_leaves: emp.taken_leaves });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// 2. PUBLIC: Send OTP (For Login Stage 2)
 app.post('/api/auth/send-otp', async (req, res) => {
     const { phone } = req.body;
     try {
         const emp = await Employee.findOne({ where: { phone } });
         if (!emp) return res.status(404).json({ error: 'Employee not found' });
-        
-        // --- PRODUCTION NOTE ---
-        // In a real app, integrate Twilio/Fast2SMS here to send real SMS.
-        // For development, we set a static OTP '123456'.
         const mockOtp = '123456'; 
-        
         await emp.update({ otp: mockOtp });
-        console.log(`[DEV] OTP for ${emp.full_name}: ${mockOtp}`); // Log to console for testing
-        
         res.json({ success: true, message: 'OTP sent successfully' });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// 3. PUBLIC: Verify OTP & Login (For Login Stage 3)
 app.post('/api/auth/verify-otp', async (req, res) => {
     const { phone, email, otp } = req.body;
     try {
-        // Find employee by phone OR email
-        const emp = await Employee.findOne({ 
-            where: { 
-                [Op.or]: [{ phone }, { email }] 
-            } 
-        });
-
-        // Validate OTP (Allow '123456' as master bypass for testing)
+        const emp = await Employee.findOne({ where: { [Op.or]: [{ phone }, { email }] } });
         if (emp && (emp.otp === otp || otp === '123456')) {
-            // Create a long-lived token for the app
             const token = jwt.sign({ id: emp.id, role: 'employee' }, SECRET_KEY, { expiresIn: '30d' });
-            
-            // Clear OTP after use
             await emp.update({ otp: null });
-            
-            res.json({ 
-                success: true, 
-                token, 
-                user: emp 
-            });
+            res.json({ success: true, token, user: emp });
         } else {
-            res.status(401).json({ error: 'Invalid or Expired OTP' });
+            res.status(401).json({ error: 'Invalid OTP' });
         }
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// 4. EMPLOYEE: Get My Specific Attendance (Dashboard)
-// Note: The existing /api/attendance route is for Admins (verifyOwner). 
-// We need this public/employee route for the app.
 app.get('/api/my-attendance/:employee_id', async (req, res) => {
-    try {
-        const records = await Attendance.findAll({
-            where: { employee_id: req.params.employee_id },
-            order: [['date', 'DESC']],
-            limit: 30 // Get last 30 days
-        });
-        res.json(records);
-    } catch (e) { res.status(500).json({ error: e.message }); }
+    const records = await Attendance.findAll({
+        where: { employee_id: req.params.employee_id },
+        order: [['date', 'DESC']],
+        limit: 30
+    });
+    res.json(records);
 });
 
-// 5. EMPLOYEE: Get My Leaves (Leave Screen)
 app.get('/api/my-leaves/:employee_id', async (req, res) => {
-    try {
-        const leaves = await LeaveRequest.findAll({
-            where: { employee_id: req.params.employee_id },
-            order: [['created_at', 'DESC']]
-        });
-        res.json(leaves);
-    } catch (e) { res.status(500).json({ error: e.message }); }
+    const leaves = await LeaveRequest.findAll({
+        where: { employee_id: req.params.employee_id },
+        order: [['created_at', 'DESC']]
+    });
+    res.json(leaves);
 });
+
 // START
 async function start() {
     try {
         await sequelize.authenticate();
         await sequelize.sync();
-        app.listen(PORT, () => console.log(`🚀 Master Server Fully Ready on Port ${PORT}`));
+        app.listen(PORT, () => console.log(`🚀 Master Server Live on Port ${PORT} (Single-Tenant Mode)`));
     } catch (e) { console.error(e); }
 }
 
