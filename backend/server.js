@@ -316,7 +316,99 @@ app.get('/api/breaks', verifyOwner, async (req, res) => {
     });
     res.json(breaks);
 });
+// =============================================================
+// 🚀 MISSING ROUTES FOR EMPLOYEE MOBILE APP
+// =============================================================
 
+// 1. PUBLIC: Verify Employee Exists (For Login Stage 1)
+app.get('/api/employees/verify/:phone', async (req, res) => {
+    try {
+        const emp = await Employee.findOne({ where: { phone: req.params.phone } });
+        if (!emp) return res.status(404).json({ error: 'Employee not found' });
+        
+        // Return only necessary info, not full profile yet
+        res.json({ 
+            id: emp.id, 
+            full_name: emp.full_name, 
+            allowed_leaves: emp.allowed_leaves, 
+            taken_leaves: emp.taken_leaves 
+        });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// 2. PUBLIC: Send OTP (For Login Stage 2)
+app.post('/api/auth/send-otp', async (req, res) => {
+    const { phone } = req.body;
+    try {
+        const emp = await Employee.findOne({ where: { phone } });
+        if (!emp) return res.status(404).json({ error: 'Employee not found' });
+        
+        // --- PRODUCTION NOTE ---
+        // In a real app, integrate Twilio/Fast2SMS here to send real SMS.
+        // For development, we set a static OTP '123456'.
+        const mockOtp = '123456'; 
+        
+        await emp.update({ otp: mockOtp });
+        console.log(`[DEV] OTP for ${emp.full_name}: ${mockOtp}`); // Log to console for testing
+        
+        res.json({ success: true, message: 'OTP sent successfully' });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// 3. PUBLIC: Verify OTP & Login (For Login Stage 3)
+app.post('/api/auth/verify-otp', async (req, res) => {
+    const { phone, email, otp } = req.body;
+    try {
+        // Find employee by phone OR email
+        const emp = await Employee.findOne({ 
+            where: { 
+                [Op.or]: [{ phone }, { email }] 
+            } 
+        });
+
+        // Validate OTP (Allow '123456' as master bypass for testing)
+        if (emp && (emp.otp === otp || otp === '123456')) {
+            // Create a long-lived token for the app
+            const token = jwt.sign({ id: emp.id, role: 'employee' }, SECRET_KEY, { expiresIn: '30d' });
+            
+            // Clear OTP after use
+            await emp.update({ otp: null });
+            
+            res.json({ 
+                success: true, 
+                token, 
+                user: emp 
+            });
+        } else {
+            res.status(401).json({ error: 'Invalid or Expired OTP' });
+        }
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// 4. EMPLOYEE: Get My Specific Attendance (Dashboard)
+// Note: The existing /api/attendance route is for Admins (verifyOwner). 
+// We need this public/employee route for the app.
+app.get('/api/my-attendance/:employee_id', async (req, res) => {
+    try {
+        const records = await Attendance.findAll({
+            where: { employee_id: req.params.employee_id },
+            order: [['date', 'DESC']],
+            limit: 30 // Get last 30 days
+        });
+        res.json(records);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// 5. EMPLOYEE: Get My Leaves (Leave Screen)
+app.get('/api/my-leaves/:employee_id', async (req, res) => {
+    try {
+        const leaves = await LeaveRequest.findAll({
+            where: { employee_id: req.params.employee_id },
+            order: [['created_at', 'DESC']]
+        });
+        res.json(leaves);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
 // START
 async function start() {
     try {
