@@ -330,7 +330,7 @@ app.get('/api/breaks', verifyOwner, async (req, res) => {
 });
 
 // --- MOBILE APP SPECIFIC ---
-pp.get('/api/employees/verify/:phone', async (req, res) => {
+app.get('/api/employees/verify/:phone', async (req, res) => {
     try {
         const emp = await Employee.findOne({ where: { phone: req.params.phone } });
         if (!emp) return res.status(404).json({ error: 'Employee not found' });
@@ -379,6 +379,7 @@ app.get('/api/my-leaves/:employee_id', async (req, res) => {
     });
     res.json(leaves);
 });
+
 // Start break
 app.post('/api/attendance/break/start', async (req, res) => {
     const { employee_id, type } = req.body;
